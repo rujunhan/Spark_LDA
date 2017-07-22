@@ -6,6 +6,7 @@ from pyspark.mllib.linalg import Vectors
 from pyspark.sql import SQLContext
 import copy
 import numpy as np
+from operator import add
 import nltk
 nltk.data.path.append("/home/rjh347/nltk_data/")
 from nltk.corpus import stopwords
@@ -53,21 +54,28 @@ def process_corpus(x,N):
 	return result
 	
 def get_corpus(filepath):
-        # return a rdd of all text corpus
+        # return a rdd of all text corpus with ngrams
         textfiles = sqlContext.read.format("com.databricks.spark.xml").option("rowTag", "body.content").load(filepath + "*.xml")
         return textfiles.map(lambda x: parse_xml(x)).map(lambda x: process_corpus(x,5))
 
 def create_vocabulary(path):
 	vcb = get_corpus(path).flatMap(lambda x: x).distinct().collect()
 	return sorted(vcb)
- 	
-def bag_of_ngrams(text):
-	result = text
-	return result
+
+def word_count(text, vcb):        
+	return text.filter(lambda x: x in vcb).map(lambda x: (vcb.index(x)+1, 1)).reduceByKey(add).collect()
 	
+
+def bag_of_ngrams(path, vcb):
+	all_text = get_corpus(path).collect()
+	for tx in all_text[0:2]:
+		print word_count(sc.parallelize(tx, len(tx)), vcb)
+
 def main():
 	vocabulary = create_vocabulary('lda/temp/')
-	print vocabulary
+	
+	bag_of_ngrams('lda/temp/', vocabulary)
+	
 
 if __name__ == "__main__":
 	main()
