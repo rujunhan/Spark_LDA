@@ -8,9 +8,6 @@ import copy
 import numpy as np
 from operator import add
 import nltk
-from nltk.corpus import stopwords
-from nltk import word_tokenize
-from nltk import ngrams
 import string
 import re
 from nltk.corpus import stopwords
