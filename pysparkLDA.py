@@ -72,22 +72,32 @@ def bag_of_ngrams(path, vcb):
 
 def runLDA(filepath, n):
 	data = sc.textFile(filepath)
-        n_vcb = data.take(2)[1]
-	print data.take(2)[0]
-        parsedData = data.map(lambda line: line.strip().split(' ')).filter(lambda x: len(x) > 2).map(lambda x: (int(x[0]), (int(x[1]), float(x[2])))).groupByKey().mapValues(list)
-	corpus = parsedData.map(lambda x: [x[0], Vectors.sparse(n_vcb, x[1])])
+        n_vcb = int(data.take(2)[1])
+
+        parsedData = data.map(lambda line: line.strip().split(' ')).filter(lambda x: len(x) > 2).map(lambda x: (int(x[0])-1, (int(x[1])-1, float(x[2])))).groupByKey().mapValues(list)
+	corpus = parsedData.map(lambda x: [x[0], Vectors.sparse(n_vcb, x[1])]).cache()
 
 	ldaModel = LDA.train(corpus, k=n)
 
 	print "Learned topics (as distributions over vocab of " + str(ldaModel.vocabSize()) + " words):"
 	print ldaModel.describeTopics(maxTermsPerTopic=20)
+        return ldaModel.topicsMatrix()
+
+def normalize(arr):
+	return [x/np.sum(arr) for x in arr]
 
 # to do: calculate document topics
-def docTopics(corpus, topicMatrix):
+def docTopics(filepath, topicMatrix):
 	# for each topic
 	# sum probablity of words in corpus
         # normalize so that probility of topics sum to 1
-	return 0
+	
+	n_vcb = topicMatrix.shape[0]
+        data = sc.textFile(filepath)
+	parsedData = data.map(lambda line: line.strip().split(' ')).map(lambda x: (int(x[0])-1, (int(x[1])-1, float(x[2])))).groupByKey().mapValues(list)
+	corpus = parsedData.map(lambda x: [x[0], normalize(Vectors.sparse(n_vcb, x[1]).dot(topicMatrix))])
+
+	return corpus.collect()
 
 
 def main():
@@ -96,32 +106,12 @@ def main():
 	#bag_of_ngrams('lda/temp/', vocabulary)
      	
 	filepath = "lda/docword.nyt.txt"
-	filepath = "lda/nips.txt"
+	filepath = "lda/docword.nips.txt"
         topic_n = 10
-	runLDA(filepath, topic_n)
+	topicMatrix = runLDA(filepath, topic_n)
+	print docTopics('lda/testcorpus.txt', topicMatrix)
                                                                                                             
 if __name__ == "__main__":
 	main()
 
-'''
-# Load and parse the data
-data = sc.textFile("lda/nips.txt")
-parsedData = data.map(lambda line: Vectors.dense([float(x) for x in line.strip().split(' ')]))
-# Index documents with unique IDs
-corpus = parsedData.zipWithIndex().map(lambda x: [x[1], x[0]]).cache()
 
-# Cluster the documents into three topics using LDA
-ldaModel = LDA.train(corpus, k=3)
-
-# Output topics. Each is a distribution over words (matching word count vectors)
-print("Learned topics (as distributions over vocab of " + str(ldaModel.vocabSize()) + " words):")
-topics = ldaModel.topicsMatrix()
-for topic in range(3):
-    print("Topic " + str(topic) + ":")
-    for word in range(0, ldaModel.vocabSize()):
-        print(" " + str(topics[word][topic]))
-
-# Save and load model
-model.save(sc, "myModelPath")
-sameModel = LDAModel.load(sc, "myModelPath")
-'''
