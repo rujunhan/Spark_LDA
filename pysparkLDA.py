@@ -22,7 +22,8 @@ conf = SparkConf().setAppName(App_Name)
 sc = SparkContext(conf=conf)
 sqlContext = SQLContext(sc)
 
-
+NGRAM = 5
+testfile = 'test'
 #obtain all files in a diretory
 
 def parse_xml(x):
@@ -40,7 +41,7 @@ def process_corpus(x,N):
         filtered_words = text.split(" ")
         # filter out stop words
         #filtered_words = [w for w in word_list if w.lower() not in stopwords.words('english')]
-        # distinguish cap words
+        # distinguish cap word
         #filtered_words = [w if w.islower() else 'zzz_' + w.lower() for w in word_list]
         result = copy.copy(filtered_words)
         # create n-grams
@@ -52,21 +53,27 @@ def process_corpus(x,N):
 def get_corpus(filepath):
         # return a rdd of all text corpus with ngrams
         textfiles = sqlContext.read.format("com.databricks.spark.xml").option("rowTag", "body.content").load(filepath + "*.xml")
-        return textfiles.map(lambda x: parse_xml(x)).map(lambda x: process_corpus(x,5))
+        return textfiles.map(lambda x: parse_xml(x))
 
 def create_vocabulary(path):
-	vcb = get_corpus(path).flatMap(lambda x: x).distinct().collect()
+	vcb = get_corpus(path).map(lambda x: process_corpus(x,NGRAM)).flatMap(lambda x: x).distinct().collect()
 	return sorted(vcb)
 
 def word_count(text, vcb):        
 	return text.filter(lambda x: x in vcb).map(lambda x: (vcb.index(x)+1, 1)).reduceByKey(add).collect()
 	
 
-def bag_of_ngrams(path, vcb):
-	all_text = get_corpus(path).collect()
-	for tx in all_text[0:2]:
-		print word_count(sc.parallelize(tx, len(tx)), vcb)
-
+def bag_of_ngrams(data, vcb): #should be path instead of x if trying to create vocabulary
+	#all_text = get_corpus(path).collect()
+	BoN = []
+	if not data:
+		return []
+        else:
+		for tx in data:
+			ngrams = process_corpus(tx, NGRAM)
+			BoN.append(word_count(sc.parallelize(ngrams, len(ngrams)), vcb))
+	return BoN
+        
 def runLDA(filepath, n):
 	data = sc.textFile(filepath)
         n_vcb = int(data.take(2)[1])
@@ -96,17 +103,47 @@ def docTopics(filepath, topicMatrix):
 
 	return corpus.collect()
 
-
-def main():
-	#vocabulary = create_vocabulary('lda/temp/')
+def inSector(x, keywords):
+	# check if corpus has keywords
+	text = re.sub("[^a-zA-Z]", " ", x)
+			
+	return bool(set([w.lower() for w in str(text).split(' ')]) & set([kw.lower() for kw in keywords]))
 	
-	#bag_of_ngrams('lda/temp/', vocabulary)
-     	
+def select_articles(path, keywords, vcb):
+
+	textfiles = sqlContext.read.format("com.databricks.spark.xml").option("rowTag", "body.content").load(path + "*.xml")
+        data = textfiles.map(lambda x: parse_xml(x)).filter(lambda x: inSector(x, keywords)).saveAsTextFile(path + testfile)
+
+	
+def main():
+
+	keywords = ['NOVELL', 'H.P.', 'QLOGIC', 'JABIL CIRCUIT', 'INTEL', 'SYMANTEC', 'AUTODESK', 'XEROX', 'CORNING', 
+'COMPUTER SCIENCES', 'CA INC', 'YAHOO', 'INTL BUSINESS MACHINES', 'MICRON TECHNOLOGY','QUALCOMM', 'TELLABS', 'NATIONAL SEMICONDUCTOR', 'COMPUWARE', 
+'CIENA', 'XILINX', 'ANALOG DEVICES', 'DELL', 'INTUIT', 'LINEAR TECHNOLOGY', 'TERADYNE', 'B.M.C.', 'FIDELITY NATIONAL INFO SVCS', 'MICROSOFT', 'WESTERN UNION', 
+'NOVELLUS', 'SUN MICROSYSTEMS', 'LSI', 'ADOBE', 'APPLE INC', 'GOOGLE', 'EMC', 'APPLIED MATERIALS', 'KLA-TENCOR', 'TEXAS INSTRUMENTS', 'ELECTRONIC DATA', 'ALTERA', 
+'ADVANCED MICRO DEVICES', 'COGNIZANT', 'MOLEX', 'NETAPP', 'AUTOMATIC DATA PROCESSING', 'PAYCHEX', 'SANDISK', 'LEXMARK', 'AFFILIATED', 'NVIDIA', 'BROADCOM', 'MOTOROLA', 
+'CONVERGYS', 'FISERV', 'VIAVI', 'IAC/INTERACTIVECORP', 'JUNIPER', 'ELECTRONIC ARTS', 'CISCO', 'MONSTER WORLDWIDE', 'EBAY', 'KODAK', 'UNISYS', 'ORACLE','CITRIX SYSTEMS', 'VERISIGN']
+	
+	# load pre-processed text corpus and train LDA
 	filepath = "lda/docword.nyt.txt"
-	filepath = "lda/docword.nips.txt"
-        topic_n = 10
+	topic_n = 10
 	topicMatrix = runLDA(filepath, topic_n)
-	print docTopics('lda/testcorpus.txt', topicMatrix)
+
+	# load or create vocabulary
+	vocabulary = create_vocabulary('lda/temp/')
+	select_articles('lda/temp/', keywords, vocabulary)
+	data = sc.textFile('lda/temp/' + testfile).collect()
+
+	# create bag of n-grams for each corpus 
+	BoN = bag_of_ngrams(data, vocabulary)
+	
+        #bag_of_ngrams('lda/temp/', vocabulary)
+     	
+	
+	#filepath = "lda/docword.nips.txt"
+        
+	# compute corpus topics with results from LDA
+	#print docTopics('lda/testcorpus.txt', topicMatrix)
                                                                                                             
 if __name__ == "__main__":
 	main()
